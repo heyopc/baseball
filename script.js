@@ -12,8 +12,9 @@ const CONFIG = {
 
     gamesPerPage: 4,
 
-    // Leave empty to show every game.
-    // Example: ["BOS", "NYY", "LAD"]
+    // Leave empty to show every team.
+    // Example:
+    // preferredTeams: ["BOS", "NYY", "LAD"],
     preferredTeams: [],
 
     // Options:
@@ -26,14 +27,20 @@ const CONFIG = {
     showBases: true,
     showEmptyCards: true,
 
-    // Set this to "2026-07-09" for testing a specific date.
-    // Leave null to use today's date.
-    dateOverride: null
+    // For testing, enter a date such as "2026-07-09".
+    // Leave null for today's date.
+    dateOverride: null,
+
+    // When today has no games, search backward for
+    // the most recent day that had games.
+    showLatestGamesWhenEmpty: true,
+
+    // Maximum number of prior days to search.
+    latestGamesLookbackDays: 14
 };
 
 /* =========================================================
-   TEAM INFORMATION
-   These are custom presentation colors, not official logos.
+   TEAM PRESENTATION COLORS
    ========================================================= */
 
 const TEAM_INFO = {
@@ -76,13 +83,18 @@ const TEAM_INFO = {
 const state = {
     games: [],
     pages: [],
+
     currentPage: 0,
 
     refreshTimer: null,
     pageTimer: null,
 
     lastSuccessfulUpdate: null,
-    isLoading: false
+
+    isLoading: false,
+
+    displayedDate: null,
+    showingPreviousDate: false
 };
 
 /* =========================================================
@@ -107,7 +119,7 @@ const elements = {
 document.addEventListener("DOMContentLoaded", initializeTicker);
 
 async function initializeTicker() {
-    updateDateLabel();
+    updateDisplayedDateLabel();
 
     await refreshScores();
 
@@ -124,7 +136,7 @@ async function initializeTicker() {
 }
 
 /* =========================================================
-   DATA REQUEST
+   SCORE REFRESH
    ========================================================= */
 
 async function refreshScores() {
@@ -135,43 +147,41 @@ async function refreshScores() {
     state.isLoading = true;
 
     try {
-        const date = getRequestDate();
+        const requestedDate = getRequestDate();
 
-        const query = new URLSearchParams({
-            sportId: "1",
-            date,
-            hydrate: "linescore,team"
-        });
+        let result = await fetchGamesForDate(requestedDate);
 
-        const requestUrl = `${CONFIG.apiBase}/schedule?${query}`;
+        state.displayedDate = requestedDate;
+        state.showingPreviousDate = false;
 
-        const response = await fetch(requestUrl, {
-            method: "GET",
-            cache: "no-store"
-        });
-
-        if (!response.ok) {
-            throw new Error(
-                `MLB request failed with status ${response.status}`
+        if (
+            result.games.length === 0 &&
+            CONFIG.showLatestGamesWhenEmpty &&
+            !CONFIG.dateOverride
+        ) {
+            const latestResult = await findLatestGamesBefore(
+                requestedDate,
+                CONFIG.latestGamesLookbackDays
             );
+
+            if (latestResult) {
+                result = latestResult;
+
+                state.displayedDate = latestResult.date;
+                state.showingPreviousDate = true;
+            }
         }
 
-        const payload = await response.json();
-
-        const rawGames =
-            Array.isArray(payload.dates) && payload.dates.length > 0
-                ? payload.dates.flatMap(dateItem => dateItem.games ?? [])
-                : [];
-
-        const processedGames = rawGames
+        const processedGames = result.games
             .map(normalizeGame)
             .filter(Boolean);
 
         state.games = sortAndFilterGames(processedGames);
+
         state.lastSuccessfulUpdate = new Date();
 
+        updateDisplayedDateLabel();
         renderTicker();
-
         setConnectionState(true);
     } catch (error) {
         console.error("Unable to update MLB ticker:", error);
@@ -183,8 +193,79 @@ async function refreshScores() {
         }
     } finally {
         state.isLoading = false;
+
         updateLastUpdatedLabel();
     }
+}
+
+/* =========================================================
+   MLB API REQUESTS
+   ========================================================= */
+
+async function fetchGamesForDate(date) {
+    const query = new URLSearchParams({
+        sportId: "1",
+        date,
+        hydrate: "linescore,team,probablePitcher"
+    });
+
+    const requestUrl =
+        `${CONFIG.apiBase}/schedule?${query.toString()}`;
+
+    const response = await fetch(requestUrl, {
+        method: "GET",
+        cache: "no-store"
+    });
+
+    if (!response.ok) {
+        throw new Error(
+            `MLB request failed with status ${response.status}`
+        );
+    }
+
+    const payload = await response.json();
+
+    const games =
+        Array.isArray(payload.dates)
+            ? payload.dates.flatMap(
+                dateItem => dateItem.games ?? []
+            )
+            : [];
+
+    return {
+        date,
+        games
+    };
+}
+
+async function findLatestGamesBefore(startDate, maximumDays) {
+    for (
+        let daysBack = 1;
+        daysBack <= maximumDays;
+        daysBack += 1
+    ) {
+        const previousDate = shiftDate(
+            startDate,
+            -daysBack
+        );
+
+        try {
+            const result = await fetchGamesForDate(
+                previousDate
+            );
+
+            if (result.games.length > 0) {
+                return result;
+            }
+        } catch (error) {
+            console.warn(
+                `Could not check games for ${previousDate}:`,
+                error
+            );
+        }
+    }
+
+    return null;
 }
 
 /* =========================================================
@@ -192,28 +273,22 @@ async function refreshScores() {
    ========================================================= */
 
 function normalizeGame(game) {
-    if (!game?.teams?.away?.team || !game?.teams?.home?.team) {
+    if (
+        !game?.teams?.away?.team ||
+        !game?.teams?.home?.team
+    ) {
         return null;
     }
 
-    const awayTeam = normalizeTeam(game.teams.away);
-    const homeTeam = normalizeTeam(game.teams.home);
+    const awayTeam = normalizeTeam(
+        game.teams.away
+    );
 
-    const abstractState =
-        game.status?.abstractGameState ??
-        "Preview";
-
-    const detailedState =
-        game.status?.detailedState ??
-        "Scheduled";
-
-    const codedState =
-        game.status?.codedGameState ??
-        "";
+    const homeTeam = normalizeTeam(
+        game.teams.home
+    );
 
     const linescore = game.linescore ?? {};
-
-    const outs = Number(linescore.outs ?? 0);
 
     return {
         id: game.gamePk,
@@ -225,28 +300,52 @@ function normalizeGame(game) {
         away: awayTeam,
         home: homeTeam,
 
-        abstractState,
-        detailedState,
-        codedState,
+        abstractState:
+            game.status?.abstractGameState ??
+            "Preview",
 
-        inning: Number(linescore.currentInning ?? 0),
-        inningOrdinal: linescore.currentInningOrdinal ?? "",
-        inningHalf: linescore.inningHalf ?? "",
+        detailedState:
+            game.status?.detailedState ??
+            "Scheduled",
 
-        outs,
+        codedState:
+            game.status?.codedGameState ??
+            "",
+
+        inning:
+            Number(linescore.currentInning ?? 0),
+
+        inningOrdinal:
+            linescore.currentInningOrdinal ??
+            "",
+
+        inningHalf:
+            linescore.inningHalf ??
+            "",
+
+        outs:
+            Number(linescore.outs ?? 0),
 
         offense: {
-            first: Boolean(linescore.offense?.first),
-            second: Boolean(linescore.offense?.second),
-            third: Boolean(linescore.offense?.third)
+            first:
+                Boolean(linescore.offense?.first),
+
+            second:
+                Boolean(linescore.offense?.second),
+
+            third:
+                Boolean(linescore.offense?.third)
         },
 
-        venue: game.venue?.name ?? "",
+        venue:
+            game.venue?.name ??
+            "",
 
         probablePitchers: {
             away:
                 game.teams.away.probablePitcher?.fullName ??
                 "",
+
             home:
                 game.teams.home.probablePitcher?.fullName ??
                 ""
@@ -261,21 +360,33 @@ function normalizeTeam(teamEntry) {
         team.abbreviation ??
         deriveAbbreviation(team.name);
 
-    // Some feeds historically use OAK, while current presentation
-    // may use ATH. This lets the color map handle either.
     if (abbreviation === "OAK") {
         abbreviation = "ATH";
     }
 
     return {
         id: team.id,
-        name: team.name ?? "Unknown",
+
+        name:
+            team.name ??
+            "Unknown",
+
         abbreviation,
 
-        score: Number(teamEntry.score ?? 0),
+        score:
+            Number(teamEntry.score ?? 0),
 
-        wins: Number(teamEntry.leagueRecord?.wins ?? 0),
-        losses: Number(teamEntry.leagueRecord?.losses ?? 0)
+        wins:
+            Number(
+                teamEntry.leagueRecord?.wins ??
+                0
+            ),
+
+        losses:
+            Number(
+                teamEntry.leagueRecord?.losses ??
+                0
+            )
     };
 }
 
@@ -290,7 +401,7 @@ function deriveAbbreviation(teamName) {
 }
 
 /* =========================================================
-   SORTING AND FILTERING
+   SORTING / FILTERING
    ========================================================= */
 
 function sortAndFilterGames(games) {
@@ -300,19 +411,22 @@ function sortAndFilterGames(games) {
         CONFIG.teamFilterMode === "preferred-only" &&
         CONFIG.preferredTeams.length > 0
     ) {
-        result = result.filter(game => isPreferredGame(game));
+        result = result.filter(
+            game => isPreferredGame(game)
+        );
     }
 
     result.sort((a, b) => {
-        const preferredDifference =
-            Number(isPreferredGame(b)) -
-            Number(isPreferredGame(a));
-
         if (
-            CONFIG.teamFilterMode === "preferred-first" &&
-            preferredDifference !== 0
+            CONFIG.teamFilterMode === "preferred-first"
         ) {
-            return preferredDifference;
+            const preferredDifference =
+                Number(isPreferredGame(b)) -
+                Number(isPreferredGame(a));
+
+            if (preferredDifference !== 0) {
+                return preferredDifference;
+            }
         }
 
         const statusDifference =
@@ -323,8 +437,13 @@ function sortAndFilterGames(games) {
             return statusDifference;
         }
 
-        const aTime = a.gameDate?.getTime() ?? 0;
-        const bTime = b.gameDate?.getTime() ?? 0;
+        const aTime =
+            a.gameDate?.getTime() ??
+            0;
+
+        const bTime =
+            b.gameDate?.getTime() ??
+            0;
 
         return aTime - bTime;
     });
@@ -338,7 +457,9 @@ function isPreferredGame(game) {
     }
 
     const preferred = new Set(
-        CONFIG.preferredTeams.map(team => team.toUpperCase())
+        CONFIG.preferredTeams.map(
+            team => team.toUpperCase()
+        )
     );
 
     return (
@@ -368,7 +489,7 @@ function getStatusSortValue(game) {
 }
 
 /* =========================================================
-   RENDERING
+   TICKER RENDERING
    ========================================================= */
 
 function renderTicker() {
@@ -376,7 +497,6 @@ function renderTicker() {
 
     if (state.games.length === 0) {
         renderNoGamesMessage();
-        renderBottomMarquee();
         return;
     }
 
@@ -392,42 +512,58 @@ function renderTicker() {
 
     elements.scoresTrack.innerHTML = "";
 
-    state.pages.forEach((games, pageIndex) => {
-        const page = document.createElement("div");
+    state.pages.forEach(
+        (games, pageIndex) => {
+            const page =
+                document.createElement("div");
 
-        page.className = "score-page";
+            page.className = "score-page";
 
-        if (pageIndex === state.currentPage) {
-            page.classList.add("is-active");
-        } else if (pageIndex < state.currentPage) {
-            page.classList.add("is-before");
-        } else {
-            page.classList.add("is-after");
-        }
-
-        games.forEach(game => {
-            page.appendChild(createGameCard(game));
-        });
-
-        if (
-            CONFIG.showEmptyCards &&
-            games.length < CONFIG.gamesPerPage
-        ) {
-            const emptyCount =
-                CONFIG.gamesPerPage - games.length;
-
-            for (let i = 0; i < emptyCount; i += 1) {
-                const emptyCard = document.createElement("div");
-
-                emptyCard.className = "empty-game-card";
-                emptyCard.textContent = "MLB";
-
-                page.appendChild(emptyCard);
+            if (pageIndex === state.currentPage) {
+                page.classList.add("is-active");
+            } else if (
+                pageIndex < state.currentPage
+            ) {
+                page.classList.add("is-before");
+            } else {
+                page.classList.add("is-after");
             }
-        }
 
-        elements.scoresTrack.appendChild(page);
-    });
+            games.forEach(game => {
+                page.appendChild(
+                    createGameCard(game)
+                );
+            });
+
+            if (
+                CONFIG.showEmptyCards &&
+                games.length < CONFIG.gamesPerPage
+            ) {
+                const emptyCount =
+                    CONFIG.gamesPerPage -
+                    games.length;
+
+                for (
+                    let i = 0;
+                    i < emptyCount;
+                    i += 1
+                ) {
+                    const emptyCard =
+                        document.createElement("div");
+
+                    emptyCard.className =
+                        "empty-game-card";
+
+                    emptyCard.textContent =
+                        "MLB";
+
+                    page.appendChild(emptyCard);
+                }
+            }
+
+            elements.scoresTrack.appendChild(page);
+        }
+    );
 
     updatePageIndicator();
     renderBottomMarquee();
@@ -438,32 +574,41 @@ function renderTicker() {
 }
 
 function createGameCard(game) {
-    const card = document.createElement("article");
+    const card =
+        document.createElement("article");
 
     card.className =
         `game-card ${getGameClass(game)}`;
 
     card.style.setProperty(
         "--card-accent",
-        getTeamColor(game.home.abbreviation)
+        getTeamColor(
+            game.home.abbreviation
+        )
     );
 
     const awayWinning =
         isFinalOrLive(game) &&
-        game.away.score > game.home.score;
+        game.away.score >
+        game.home.score;
 
     const homeWinning =
         isFinalOrLive(game) &&
-        game.home.score > game.away.score;
+        game.home.score >
+        game.away.score;
 
     card.innerHTML = `
         <header class="game-header">
             <span class="game-header-status">
-                ${escapeHtml(getPrimaryStatus(game))}
+                ${escapeHtml(
+                    getPrimaryStatus(game)
+                )}
             </span>
 
             <span class="game-header-extra">
-                ${escapeHtml(getHeaderExtra(game))}
+                ${escapeHtml(
+                    getHeaderExtra(game)
+                )}
             </span>
         </header>
 
@@ -471,26 +616,35 @@ function createGameCard(game) {
             game.away,
             "away",
             awayWinning,
-            homeWinning
+            homeWinning,
+            game
         )}
 
         ${createTeamRowHtml(
             game.home,
             "home",
             homeWinning,
-            awayWinning
+            awayWinning,
+            game
         )}
 
         <footer class="game-footer">
             <span class="game-detail ${
-                isLiveGame(game) ? "game-live" : ""
+                isLiveGame(game)
+                    ? "game-live"
+                    : ""
             }">
-                ${escapeHtml(getGameDetail(game))}
+                ${escapeHtml(
+                    getGameDetail(game)
+                )}
             </span>
 
             ${
-                CONFIG.showBases && isLiveGame(game)
-                    ? createBasesHtml(game.offense)
+                CONFIG.showBases &&
+                isLiveGame(game)
+                    ? createBasesHtml(
+                        game.offense
+                    )
                     : ""
             }
         </footer>
@@ -503,7 +657,8 @@ function createTeamRowHtml(
     team,
     homeAway,
     isWinning,
-    isLosing
+    isLosing,
+    game
 ) {
     const classes = [
         "team-row",
@@ -518,22 +673,32 @@ function createTeamRowHtml(
         classes.push("is-losing");
     }
 
-    const record = CONFIG.showRecords
-        ? `${team.wins}-${team.losses}`
-        : "";
+    const record =
+        CONFIG.showRecords
+            ? `${team.wins}-${team.losses}`
+            : "";
+
+    const score =
+        shouldShowScore(game)
+            ? team.score
+            : "–";
 
     return `
         <div class="${classes.join(" ")}">
             <span
                 class="team-color"
-                style="--team-color: ${getTeamColor(
-                    team.abbreviation
-                )}"
+                style="--team-color: ${
+                    getTeamColor(
+                        team.abbreviation
+                    )
+                }"
             ></span>
 
             <span class="team-info">
                 <span class="team-abbreviation">
-                    ${escapeHtml(team.abbreviation)}
+                    ${escapeHtml(
+                        team.abbreviation
+                    )}
                 </span>
 
                 ${
@@ -548,9 +713,7 @@ function createTeamRowHtml(
             </span>
 
             <span class="team-score">
-                ${shouldShowScore(team)
-                    ? team.score
-                    : "–"}
+                ${score}
             </span>
         </div>
     `;
@@ -558,33 +721,44 @@ function createTeamRowHtml(
 
 function createBasesHtml(offense) {
     return `
-        <span class="bases" aria-label="Runners on base">
+        <span
+            class="bases"
+            aria-label="Runners on base"
+        >
             <span class="base base-first ${
-                offense.first ? "is-occupied" : ""
+                offense.first
+                    ? "is-occupied"
+                    : ""
             }"></span>
 
             <span class="base base-second ${
-                offense.second ? "is-occupied" : ""
+                offense.second
+                    ? "is-occupied"
+                    : ""
             }"></span>
 
             <span class="base base-third ${
-                offense.third ? "is-occupied" : ""
+                offense.third
+                    ? "is-occupied"
+                    : ""
             }"></span>
         </span>
     `;
 }
 
 /* =========================================================
-   STATUS TEXT
+   GAME STATUS TEXT
    ========================================================= */
 
 function getPrimaryStatus(game) {
     if (isFinalGame(game)) {
-        return game.detailedState
-            .toUpperCase()
-            .includes("FINAL")
-                ? game.detailedState
-                : "Final";
+        if (
+            /final/i.test(game.detailedState)
+        ) {
+            return game.detailedState;
+        }
+
+        return "Final";
     }
 
     if (isLiveGame(game)) {
@@ -602,7 +776,9 @@ function getPrimaryStatus(game) {
         return game.detailedState;
     }
 
-    return formatGameTime(game.gameDate);
+    return formatGameTime(
+        game.gameDate
+    );
 }
 
 function getHeaderExtra(game) {
@@ -634,11 +810,20 @@ function getGameDetail(game) {
         return game.detailedState;
     }
 
-    const awayPitcher = game.probablePitchers.away;
-    const homePitcher = game.probablePitchers.home;
+    const awayPitcher =
+        game.probablePitchers.away;
 
-    if (awayPitcher && homePitcher) {
-        return `${lastName(awayPitcher)} vs ${lastName(homePitcher)}`;
+    const homePitcher =
+        game.probablePitchers.home;
+
+    if (
+        awayPitcher &&
+        homePitcher
+    ) {
+        return (
+            `${lastName(awayPitcher)} vs ` +
+            `${lastName(homePitcher)}`
+        );
     }
 
     if (game.venue) {
@@ -657,14 +842,20 @@ function formatOuts(outs) {
 }
 
 function formatGameTime(date) {
-    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    if (
+        !(date instanceof Date) ||
+        Number.isNaN(date.getTime())
+    ) {
         return "TBD";
     }
 
-    return new Intl.DateTimeFormat("en-US", {
-        hour: "numeric",
-        minute: "2-digit"
-    }).format(date);
+    return new Intl.DateTimeFormat(
+        "en-US",
+        {
+            hour: "numeric",
+            minute: "2-digit"
+        }
+    ).format(date);
 }
 
 function lastName(fullName) {
@@ -672,7 +863,10 @@ function lastName(fullName) {
         .trim()
         .split(/\s+/);
 
-    return parts.at(-1) ?? fullName;
+    return (
+        parts.at(-1) ??
+        fullName
+    );
 }
 
 /* =========================================================
@@ -698,11 +892,17 @@ function isDelayedGame(game) {
 }
 
 function isFinalOrLive(game) {
-    return isFinalGame(game) || isLiveGame(game);
+    return (
+        isFinalGame(game) ||
+        isLiveGame(game)
+    );
 }
 
-function shouldShowScore(team) {
-    return Number.isFinite(team.score);
+function shouldShowScore(game) {
+    return (
+        isLiveGame(game) ||
+        isFinalGame(game)
+    );
 }
 
 function getGameClass(game) {
@@ -736,7 +936,10 @@ function startPageRotation() {
 
 function stopPageRotation() {
     if (state.pageTimer !== null) {
-        window.clearInterval(state.pageTimer);
+        window.clearInterval(
+            state.pageTimer
+        );
+
         state.pageTimer = null;
     }
 }
@@ -746,7 +949,8 @@ function showNextPage() {
         return;
     }
 
-    const previousPage = state.currentPage;
+    const previousPage =
+        state.currentPage;
 
     state.currentPage =
         (state.currentPage + 1) %
@@ -758,58 +962,85 @@ function showNextPage() {
 
 function updatePageClasses(previousPage) {
     const pageElements =
-        elements.scoresTrack.querySelectorAll(".score-page");
-
-    pageElements.forEach((page, index) => {
-        page.classList.remove(
-            "is-active",
-            "is-before",
-            "is-after"
+        elements.scoresTrack.querySelectorAll(
+            ".score-page"
         );
 
-        if (index === state.currentPage) {
-            page.classList.add("is-active");
-            return;
-        }
+    pageElements.forEach(
+        (page, index) => {
+            page.classList.remove(
+                "is-active",
+                "is-before",
+                "is-after"
+            );
 
-        if (
-            previousPage === state.pages.length - 1 &&
-            state.currentPage === 0
-        ) {
-            page.classList.add("is-after");
-            return;
-        }
+            if (
+                index === state.currentPage
+            ) {
+                page.classList.add(
+                    "is-active"
+                );
 
-        if (index < state.currentPage) {
-            page.classList.add("is-before");
-        } else {
-            page.classList.add("is-after");
+                return;
+            }
+
+            if (
+                previousPage ===
+                    state.pages.length - 1 &&
+                state.currentPage === 0
+            ) {
+                page.classList.add(
+                    "is-after"
+                );
+
+                return;
+            }
+
+            if (
+                index < state.currentPage
+            ) {
+                page.classList.add(
+                    "is-before"
+                );
+            } else {
+                page.classList.add(
+                    "is-after"
+                );
+            }
         }
-    });
+    );
 }
 
 function updatePageIndicator() {
-    const pageCount = Math.max(state.pages.length, 1);
+    const pageCount = Math.max(
+        state.pages.length,
+        1
+    );
 
     elements.pageIndicator.textContent =
         `${state.currentPage + 1} / ${pageCount}`;
 }
 
 /* =========================================================
-   LOWER MARQUEE
+   BOTTOM MARQUEE
    ========================================================= */
 
 function renderBottomMarquee() {
     if (state.games.length === 0) {
         elements.bottomMarquee.textContent =
-            "No MLB games are scheduled for the selected date.";
+            "No recent MLB games were found.";
+
+        restartMarqueeAnimation();
 
         return;
     }
 
     const summaries = state.games.map(game => {
-        const away = game.away.abbreviation;
-        const home = game.home.abbreviation;
+        const away =
+            game.away.abbreviation;
+
+        const home =
+            game.home.abbreviation;
 
         if (isLiveGame(game)) {
             return (
@@ -842,16 +1073,21 @@ function renderBottomMarquee() {
     elements.bottomMarquee.textContent =
         summaries.join("     •     ");
 
-    // Restart the animation whenever text changes.
-    elements.bottomMarquee.style.animation = "none";
+    restartMarqueeAnimation();
+}
+
+function restartMarqueeAnimation() {
+    elements.bottomMarquee.style.animation =
+        "none";
 
     void elements.bottomMarquee.offsetWidth;
 
-    elements.bottomMarquee.style.animation = "";
+    elements.bottomMarquee.style.animation =
+        "";
 }
 
 /* =========================================================
-   EMPTY AND ERROR STATES
+   EMPTY / ERROR STATES
    ========================================================= */
 
 function renderNoGamesMessage() {
@@ -860,11 +1096,21 @@ function renderNoGamesMessage() {
 
     elements.scoresTrack.innerHTML = `
         <div class="message-card">
-            No MLB games scheduled today
+            No recent MLB games found
         </div>
     `;
 
-    elements.pageIndicator.textContent = "0 / 0";
+    elements.pageIndicator.textContent =
+        "0 / 0";
+
+    elements.bottomLabel.textContent =
+        "MLB SCOREBOARD";
+
+    elements.bottomMarquee.textContent =
+        "No MLB games were found within the previous " +
+        `${CONFIG.latestGamesLookbackDays} days.`;
+
+    restartMarqueeAnimation();
 }
 
 function renderErrorMessage() {
@@ -877,11 +1123,17 @@ function renderErrorMessage() {
         </div>
     `;
 
-    elements.pageIndicator.textContent = "—";
+    elements.pageIndicator.textContent =
+        "—";
+
+    elements.bottomMarquee.textContent =
+        "Unable to reach the MLB score service. Retrying automatically.";
+
+    restartMarqueeAnimation();
 }
 
 /* =========================================================
-   CONNECTION AND TIME LABELS
+   CONNECTION / DATE LABELS
    ========================================================= */
 
 function setConnectionState(isConnected) {
@@ -890,37 +1142,58 @@ function setConnectionState(isConnected) {
         !isConnected
     );
 
+    elements.liveDot.classList.toggle(
+        "is-previous",
+        isConnected &&
+        state.showingPreviousDate
+    );
+
+    if (!isConnected) {
+        elements.connectionLabel.textContent =
+            "RETRYING";
+
+        return;
+    }
+
     elements.connectionLabel.textContent =
-        isConnected
-            ? "LIVE SCORES"
-            : "RETRYING";
+        state.showingPreviousDate
+            ? "LATEST RESULTS"
+            : "LIVE SCORES";
 }
 
 function updateLastUpdatedLabel() {
     if (!state.lastSuccessfulUpdate) {
-        elements.lastUpdated.textContent = "WAITING";
+        elements.lastUpdated.textContent =
+            "WAITING";
+
         return;
     }
 
-    const formatted = new Intl.DateTimeFormat(
-        "en-US",
-        {
-            hour: "numeric",
-            minute: "2-digit",
-            second: "2-digit"
-        }
-    ).format(state.lastSuccessfulUpdate);
+    const formatted =
+        new Intl.DateTimeFormat(
+            "en-US",
+            {
+                hour: "numeric",
+                minute: "2-digit",
+                second: "2-digit"
+            }
+        ).format(
+            state.lastSuccessfulUpdate
+        );
 
     elements.lastUpdated.textContent =
         `UPDATED ${formatted}`;
 }
 
-function updateDateLabel() {
-    const requestDate = getRequestDate();
+function updateDisplayedDateLabel() {
+    const dateString =
+        state.displayedDate ??
+        getRequestDate();
 
-    const date = parseLocalDate(requestDate);
+    const date =
+        parseLocalDate(dateString);
 
-    elements.tickerDate.textContent =
+    const formattedDate =
         new Intl.DateTimeFormat(
             "en-US",
             {
@@ -931,10 +1204,25 @@ function updateDateLabel() {
         )
             .format(date)
             .toUpperCase();
+
+    elements.tickerDate.textContent =
+        state.showingPreviousDate
+            ? `LATEST • ${formattedDate}`
+            : formattedDate;
+
+    elements.bottomLabel.textContent =
+        state.showingPreviousDate
+            ? "LATEST MLB SCORES"
+            : "MLB SCOREBOARD";
+
+    elements.connectionLabel.textContent =
+        state.showingPreviousDate
+            ? "LATEST RESULTS"
+            : "LIVE SCORES";
 }
 
 /* =========================================================
-   UTILITIES
+   DATE UTILITIES
    ========================================================= */
 
 function getRequestDate() {
@@ -942,25 +1230,51 @@ function getRequestDate() {
         return CONFIG.dateOverride;
     }
 
-    const now = new Date();
+    return formatLocalDate(
+        new Date()
+    );
+}
 
-    const year = now.getFullYear();
-    const month = String(
-        now.getMonth() + 1
-    ).padStart(2, "0");
+function shiftDate(
+    dateString,
+    dayAmount
+) {
+    const date =
+        parseLocalDate(dateString);
 
-    const day = String(
-        now.getDate()
-    ).padStart(2, "0");
+    date.setDate(
+        date.getDate() +
+        dayAmount
+    );
+
+    return formatLocalDate(date);
+}
+
+function formatLocalDate(date) {
+    const year =
+        date.getFullYear();
+
+    const month =
+        String(
+            date.getMonth() + 1
+        ).padStart(2, "0");
+
+    const day =
+        String(
+            date.getDate()
+        ).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
 }
 
 function parseLocalDate(dateString) {
-    const [year, month, day] =
-        dateString
-            .split("-")
-            .map(Number);
+    const [
+        year,
+        month,
+        day
+    ] = dateString
+        .split("-")
+        .map(Number);
 
     return new Date(
         year,
@@ -972,6 +1286,10 @@ function parseLocalDate(dateString) {
     );
 }
 
+/* =========================================================
+   GENERAL UTILITIES
+   ========================================================= */
+
 function getTeamColor(abbreviation) {
     return (
         TEAM_INFO[abbreviation]?.color ??
@@ -982,8 +1300,14 @@ function getTeamColor(abbreviation) {
 function chunkArray(items, size) {
     const chunks = [];
 
-    for (let i = 0; i < items.length; i += size) {
-        chunks.push(items.slice(i, i + size));
+    for (
+        let i = 0;
+        i < items.length;
+        i += size
+    ) {
+        chunks.push(
+            items.slice(i, i + size)
+        );
     }
 
     return chunks;
