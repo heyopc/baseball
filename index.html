@@ -1,1 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
 
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>MLB Score Ticker</title>
+
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <main id="ticker" class="ticker">
+        <!-- Left league/branding block -->
+        <section class="ticker-brand" aria-label="MLB scoreboard">
+            <div class="brand-top">
+                <span class="brand-baseball">●</span>
+                <span class="brand-text">MLB</span>
+            </div>
+
+            <div id="ticker-date" class="brand-date">
+                TODAY
+            </div>
+        </section>
+
+        <!-- Score viewport -->
+        <section class="scores-viewport">
+            <div id="scores-track" class="scores-track">
+                <div class="message-card">
+                    <div class="loading-spinner"></div>
+                    <span>Loading MLB scores…</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Page and refresh information -->
+        <section class="ticker-meta">
+            <div class="meta-live-row">
+                <span id="live-dot" class="live-dot"></span>
+                <span id="connection-label">LIVE SCORES</span>
+            </div>
+
+            <div id="page-indicator" class="page-indicator">
+                1 / 1
+            </div>
+
+            <div id="last-updated" class="last-updated">
+                UPDATING
+            </div>
+        </section>
+
+        <!-- Thin lower information strip -->
+        <section class="ticker-bottom">
+            <div id="bottom-label" class="bottom-label">
+                MLB SCOREBOARD
+            </div>
+
+            <div class="bottom-marquee-viewport">
+                <div id="bottom-marquee" class="bottom-marquee">
+                    Live scores and game information update automatically.
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
