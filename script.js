@@ -12,12 +12,8 @@ const CONFIG = {
 
     gamesPerPage: 4,
 
-    // Leave empty to show every team.
-    // Example:
-    // preferredTeams: ["BOS", "NYY", "LAD"],
     preferredTeams: [],
 
-    // Options:
     // "all"
     // "preferred-first"
     // "preferred-only"
@@ -25,22 +21,18 @@ const CONFIG = {
 
     showRecords: true,
     showBases: true,
-    showEmptyCards: true,
 
-    // For testing, enter a date such as "2026-07-09".
-    // Leave null for today's date.
+    // Use a date such as "2026-07-09" for testing.
     dateOverride: null,
 
-    // When today has no games, search backward for
-    // the most recent day that had games.
+    // When today has no games, display the most recent slate.
     showLatestGamesWhenEmpty: true,
 
-    // Maximum number of prior days to search.
     latestGamesLookbackDays: 14
 };
 
 /* =========================================================
-   TEAM PRESENTATION COLORS
+   TEAM COLORS
    ========================================================= */
 
 const TEAM_INFO = {
@@ -102,21 +94,45 @@ const state = {
    ========================================================= */
 
 const elements = {
-    scoresTrack: document.querySelector("#scores-track"),
-    tickerDate: document.querySelector("#ticker-date"),
-    pageIndicator: document.querySelector("#page-indicator"),
-    lastUpdated: document.querySelector("#last-updated"),
-    liveDot: document.querySelector("#live-dot"),
-    connectionLabel: document.querySelector("#connection-label"),
-    bottomMarquee: document.querySelector("#bottom-marquee"),
-    bottomLabel: document.querySelector("#bottom-label")
+    scoresTrack:
+        document.querySelector("#scores-track"),
+
+    tickerDate:
+        document.querySelector("#ticker-date"),
+
+    pageIndicator:
+        document.querySelector("#page-indicator"),
+
+    lastUpdated:
+        document.querySelector("#last-updated"),
+
+    liveDot:
+        document.querySelector("#live-dot"),
+
+    connectionLabel:
+        document.querySelector("#connection-label"),
+
+    bottomLabel:
+        document.querySelector("#bottom-label"),
+
+    marqueeTrack:
+        document.querySelector("#bottom-marquee-track"),
+
+    marqueeOne:
+        document.querySelector("#bottom-marquee-one"),
+
+    marqueeTwo:
+        document.querySelector("#bottom-marquee-two")
 };
 
 /* =========================================================
    STARTUP
    ========================================================= */
 
-document.addEventListener("DOMContentLoaded", initializeTicker);
+document.addEventListener(
+    "DOMContentLoaded",
+    initializeTicker
+);
 
 async function initializeTicker() {
     updateDisplayedDateLabel();
@@ -128,11 +144,14 @@ async function initializeTicker() {
         CONFIG.refreshIntervalMs
     );
 
-    document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-            refreshScores();
+    document.addEventListener(
+        "visibilitychange",
+        () => {
+            if (!document.hidden) {
+                refreshScores();
+            }
         }
-    });
+    );
 }
 
 /* =========================================================
@@ -147,44 +166,63 @@ async function refreshScores() {
     state.isLoading = true;
 
     try {
-        const requestedDate = getRequestDate();
+        const requestedDate =
+            getRequestDate();
 
-        let result = await fetchGamesForDate(requestedDate);
+        let result =
+            await fetchGamesForDate(
+                requestedDate
+            );
 
-        state.displayedDate = requestedDate;
-        state.showingPreviousDate = false;
+        state.displayedDate =
+            requestedDate;
+
+        state.showingPreviousDate =
+            false;
 
         if (
             result.games.length === 0 &&
             CONFIG.showLatestGamesWhenEmpty &&
             !CONFIG.dateOverride
         ) {
-            const latestResult = await findLatestGamesBefore(
-                requestedDate,
-                CONFIG.latestGamesLookbackDays
-            );
+            const latestResult =
+                await findLatestGamesBefore(
+                    requestedDate,
+                    CONFIG.latestGamesLookbackDays
+                );
 
             if (latestResult) {
                 result = latestResult;
 
-                state.displayedDate = latestResult.date;
-                state.showingPreviousDate = true;
+                state.displayedDate =
+                    latestResult.date;
+
+                state.showingPreviousDate =
+                    true;
             }
         }
 
-        const processedGames = result.games
-            .map(normalizeGame)
-            .filter(Boolean);
+        const processedGames =
+            result.games
+                .map(normalizeGame)
+                .filter(Boolean);
 
-        state.games = sortAndFilterGames(processedGames);
+        state.games =
+            sortAndFilterGames(
+                processedGames
+            );
 
-        state.lastSuccessfulUpdate = new Date();
+        state.lastSuccessfulUpdate =
+            new Date();
 
         updateDisplayedDateLabel();
         renderTicker();
         setConnectionState(true);
     } catch (error) {
-        console.error("Unable to update MLB ticker:", error);
+        console.error(
+            "Unable to update MLB ticker:",
+            error
+        );
 
         setConnectionState(false);
 
@@ -203,19 +241,22 @@ async function refreshScores() {
    ========================================================= */
 
 async function fetchGamesForDate(date) {
-    const query = new URLSearchParams({
-        sportId: "1",
-        date,
-        hydrate: "linescore,team,probablePitcher"
-    });
+    const query =
+        new URLSearchParams({
+            sportId: "1",
+            date,
+            hydrate:
+                "linescore,team,probablePitcher"
+        });
 
     const requestUrl =
         `${CONFIG.apiBase}/schedule?${query.toString()}`;
 
-    const response = await fetch(requestUrl, {
-        method: "GET",
-        cache: "no-store"
-    });
+    const response =
+        await fetch(requestUrl, {
+            method: "GET",
+            cache: "no-store"
+        });
 
     if (!response.ok) {
         throw new Error(
@@ -223,12 +264,14 @@ async function fetchGamesForDate(date) {
         );
     }
 
-    const payload = await response.json();
+    const payload =
+        await response.json();
 
     const games =
         Array.isArray(payload.dates)
             ? payload.dates.flatMap(
-                dateItem => dateItem.games ?? []
+                dateItem =>
+                    dateItem.games ?? []
             )
             : [];
 
@@ -238,21 +281,26 @@ async function fetchGamesForDate(date) {
     };
 }
 
-async function findLatestGamesBefore(startDate, maximumDays) {
+async function findLatestGamesBefore(
+    startDate,
+    maximumDays
+) {
     for (
         let daysBack = 1;
         daysBack <= maximumDays;
         daysBack += 1
     ) {
-        const previousDate = shiftDate(
-            startDate,
-            -daysBack
-        );
+        const previousDate =
+            shiftDate(
+                startDate,
+                -daysBack
+            );
 
         try {
-            const result = await fetchGamesForDate(
-                previousDate
-            );
+            const result =
+                await fetchGamesForDate(
+                    previousDate
+                );
 
             if (result.games.length > 0) {
                 return result;
@@ -269,7 +317,7 @@ async function findLatestGamesBefore(startDate, maximumDays) {
 }
 
 /* =========================================================
-   NORMALIZE API DATA
+   NORMALIZE GAME DATA
    ========================================================= */
 
 function normalizeGame(game) {
@@ -280,22 +328,34 @@ function normalizeGame(game) {
         return null;
     }
 
-    const awayTeam = normalizeTeam(
-        game.teams.away
-    );
+    const linescore =
+        game.linescore ?? {};
 
-    const homeTeam = normalizeTeam(
-        game.teams.home
-    );
+    const awayLinescore =
+        linescore.teams?.away ?? {};
 
-    const linescore = game.linescore ?? {};
+    const homeLinescore =
+        linescore.teams?.home ?? {};
+
+    const awayTeam =
+        normalizeTeam(
+            game.teams.away,
+            awayLinescore
+        );
+
+    const homeTeam =
+        normalizeTeam(
+            game.teams.home,
+            homeLinescore
+        );
 
     return {
         id: game.gamePk,
 
-        gameDate: game.gameDate
-            ? new Date(game.gameDate)
-            : null,
+        gameDate:
+            game.gameDate
+                ? new Date(game.gameDate)
+                : null,
 
         away: awayTeam,
         home: homeTeam,
@@ -313,7 +373,9 @@ function normalizeGame(game) {
             "",
 
         inning:
-            Number(linescore.currentInning ?? 0),
+            Number(
+                linescore.currentInning ?? 0
+            ),
 
         inningOrdinal:
             linescore.currentInningOrdinal ??
@@ -328,13 +390,19 @@ function normalizeGame(game) {
 
         offense: {
             first:
-                Boolean(linescore.offense?.first),
+                Boolean(
+                    linescore.offense?.first
+                ),
 
             second:
-                Boolean(linescore.offense?.second),
+                Boolean(
+                    linescore.offense?.second
+                ),
 
             third:
-                Boolean(linescore.offense?.third)
+                Boolean(
+                    linescore.offense?.third
+                )
         },
 
         venue:
@@ -343,18 +411,24 @@ function normalizeGame(game) {
 
         probablePitchers: {
             away:
-                game.teams.away.probablePitcher?.fullName ??
-                "",
+                game.teams.away
+                    .probablePitcher
+                    ?.fullName ?? "",
 
             home:
-                game.teams.home.probablePitcher?.fullName ??
-                ""
+                game.teams.home
+                    .probablePitcher
+                    ?.fullName ?? ""
         }
     };
 }
 
-function normalizeTeam(teamEntry) {
-    const team = teamEntry.team ?? {};
+function normalizeTeam(
+    teamEntry,
+    linescoreTeam
+) {
+    const team =
+        teamEntry.team ?? {};
 
     let abbreviation =
         team.abbreviation ??
@@ -365,27 +439,43 @@ function normalizeTeam(teamEntry) {
     }
 
     return {
-        id: team.id,
+        id:
+            team.id,
 
         name:
-            team.name ??
-            "Unknown",
+            team.name ?? "Unknown",
 
         abbreviation,
 
-        score:
-            Number(teamEntry.score ?? 0),
+        runs:
+            Number(
+                linescoreTeam.runs ??
+                teamEntry.score ??
+                0
+            ),
+
+        hits:
+            Number(
+                linescoreTeam.hits ??
+                0
+            ),
+
+        errors:
+            Number(
+                linescoreTeam.errors ??
+                0
+            ),
 
         wins:
             Number(
-                teamEntry.leagueRecord?.wins ??
-                0
+                teamEntry.leagueRecord
+                    ?.wins ?? 0
             ),
 
         losses:
             Number(
-                teamEntry.leagueRecord?.losses ??
-                0
+                teamEntry.leagueRecord
+                    ?.losses ?? 0
             )
     };
 }
@@ -401,14 +491,15 @@ function deriveAbbreviation(teamName) {
 }
 
 /* =========================================================
-   SORTING / FILTERING
+   SORTING AND FILTERING
    ========================================================= */
 
 function sortAndFilterGames(games) {
     let result = [...games];
 
     if (
-        CONFIG.teamFilterMode === "preferred-only" &&
+        CONFIG.teamFilterMode ===
+            "preferred-only" &&
         CONFIG.preferredTeams.length > 0
     ) {
         result = result.filter(
@@ -418,7 +509,8 @@ function sortAndFilterGames(games) {
 
     result.sort((a, b) => {
         if (
-            CONFIG.teamFilterMode === "preferred-first"
+            CONFIG.teamFilterMode ===
+            "preferred-first"
         ) {
             const preferredDifference =
                 Number(isPreferredGame(b)) -
@@ -438,12 +530,10 @@ function sortAndFilterGames(games) {
         }
 
         const aTime =
-            a.gameDate?.getTime() ??
-            0;
+            a.gameDate?.getTime() ?? 0;
 
         const bTime =
-            b.gameDate?.getTime() ??
-            0;
+            b.gameDate?.getTime() ?? 0;
 
         return aTime - bTime;
     });
@@ -452,19 +542,27 @@ function sortAndFilterGames(games) {
 }
 
 function isPreferredGame(game) {
-    if (CONFIG.preferredTeams.length === 0) {
+    if (
+        CONFIG.preferredTeams.length === 0
+    ) {
         return false;
     }
 
-    const preferred = new Set(
-        CONFIG.preferredTeams.map(
-            team => team.toUpperCase()
-        )
-    );
+    const preferred =
+        new Set(
+            CONFIG.preferredTeams.map(
+                team =>
+                    team.toUpperCase()
+            )
+        );
 
     return (
-        preferred.has(game.away.abbreviation) ||
-        preferred.has(game.home.abbreviation)
+        preferred.has(
+            game.away.abbreviation
+        ) ||
+        preferred.has(
+            game.home.abbreviation
+        )
     );
 }
 
@@ -489,7 +587,7 @@ function getStatusSortValue(game) {
 }
 
 /* =========================================================
-   TICKER RENDERING
+   RENDER TICKER
    ========================================================= */
 
 function renderTicker() {
@@ -500,15 +598,17 @@ function renderTicker() {
         return;
     }
 
-    state.pages = chunkArray(
-        state.games,
-        CONFIG.gamesPerPage
-    );
+    state.pages =
+        chunkArray(
+            state.games,
+            CONFIG.gamesPerPage
+        );
 
-    state.currentPage = Math.min(
-        state.currentPage,
-        state.pages.length - 1
-    );
+    state.currentPage =
+        Math.min(
+            state.currentPage,
+            state.pages.length - 1
+        );
 
     elements.scoresTrack.innerHTML = "";
 
@@ -517,16 +617,34 @@ function renderTicker() {
             const page =
                 document.createElement("div");
 
-            page.className = "score-page";
+            page.className =
+                "score-page";
 
-            if (pageIndex === state.currentPage) {
-                page.classList.add("is-active");
-            } else if (
-                pageIndex < state.currentPage
+            /*
+             * No empty cards are created.
+             * Existing cards expand evenly to fill the page.
+             */
+            page.style.gridTemplateColumns =
+                `repeat(${games.length}, minmax(0, 1fr))`;
+
+            if (
+                pageIndex ===
+                state.currentPage
             ) {
-                page.classList.add("is-before");
+                page.classList.add(
+                    "is-active"
+                );
+            } else if (
+                pageIndex <
+                state.currentPage
+            ) {
+                page.classList.add(
+                    "is-before"
+                );
             } else {
-                page.classList.add("is-after");
+                page.classList.add(
+                    "is-after"
+                );
             }
 
             games.forEach(game => {
@@ -535,33 +653,8 @@ function renderTicker() {
                 );
             });
 
-            if (
-                CONFIG.showEmptyCards &&
-                games.length < CONFIG.gamesPerPage
-            ) {
-                const emptyCount =
-                    CONFIG.gamesPerPage -
-                    games.length;
-
-                for (
-                    let i = 0;
-                    i < emptyCount;
-                    i += 1
-                ) {
-                    const emptyCard =
-                        document.createElement("div");
-
-                    emptyCard.className =
-                        "empty-game-card";
-
-                    emptyCard.textContent =
-                        "MLB";
-
-                    page.appendChild(emptyCard);
-                }
-            }
-
-            elements.scoresTrack.appendChild(page);
+            elements.scoresTrack
+                .appendChild(page);
         }
     );
 
@@ -589,13 +682,13 @@ function createGameCard(game) {
 
     const awayWinning =
         isFinalOrLive(game) &&
-        game.away.score >
-        game.home.score;
+        game.away.runs >
+        game.home.runs;
 
     const homeWinning =
         isFinalOrLive(game) &&
-        game.home.score >
-        game.away.score;
+        game.home.runs >
+        game.away.runs;
 
     card.innerHTML = `
         <header class="game-header">
@@ -605,11 +698,9 @@ function createGameCard(game) {
                 )}
             </span>
 
-            <span class="game-header-extra">
-                ${escapeHtml(
-                    getHeaderExtra(game)
-                )}
-            </span>
+            <span class="stat-heading">R</span>
+            <span class="stat-heading">H</span>
+            <span class="stat-heading">E</span>
         </header>
 
         ${createTeamRowHtml(
@@ -678,10 +769,8 @@ function createTeamRowHtml(
             ? `${team.wins}-${team.losses}`
             : "";
 
-    const score =
-        shouldShowScore(game)
-            ? team.score
-            : "–";
+    const hasScore =
+        shouldShowScore(game);
 
     return `
         <div class="${classes.join(" ")}">
@@ -712,8 +801,16 @@ function createTeamRowHtml(
                 }
             </span>
 
-            <span class="team-score">
-                ${score}
+            <span class="team-stat">
+                ${hasScore ? team.runs : "–"}
+            </span>
+
+            <span class="team-stat team-secondary-stat">
+                ${hasScore ? team.hits : "–"}
+            </span>
+
+            <span class="team-stat team-secondary-stat">
+                ${hasScore ? team.errors : "–"}
             </span>
         </div>
     `;
@@ -747,25 +844,24 @@ function createBasesHtml(offense) {
 }
 
 /* =========================================================
-   GAME STATUS TEXT
+   STATUS TEXT
    ========================================================= */
 
 function getPrimaryStatus(game) {
     if (isFinalGame(game)) {
-        if (
-            /final/i.test(game.detailedState)
-        ) {
-            return game.detailedState;
-        }
-
-        return "Final";
+        return /final/i.test(
+            game.detailedState
+        )
+            ? game.detailedState
+            : "Final";
     }
 
     if (isLiveGame(game)) {
         const half =
             game.inningHalf === "Top"
                 ? "Top"
-                : game.inningHalf === "Bottom"
+                : game.inningHalf ===
+                    "Bottom"
                     ? "Bot"
                     : game.inningHalf;
 
@@ -781,29 +877,13 @@ function getPrimaryStatus(game) {
     );
 }
 
-function getHeaderExtra(game) {
-    if (isLiveGame(game)) {
-        return formatOuts(game.outs);
-    }
-
-    if (isFinalGame(game)) {
-        return "FINAL";
-    }
-
-    if (isDelayedGame(game)) {
-        return "STATUS";
-    }
-
-    return "";
-}
-
 function getGameDetail(game) {
     if (isLiveGame(game)) {
         return formatOuts(game.outs);
     }
 
     if (isFinalGame(game)) {
-        return "Game complete";
+        return "Final";
     }
 
     if (isDelayedGame(game)) {
@@ -859,14 +939,12 @@ function formatGameTime(date) {
 }
 
 function lastName(fullName) {
-    const parts = String(fullName)
-        .trim()
-        .split(/\s+/);
+    const parts =
+        String(fullName)
+            .trim()
+            .split(/\s+/);
 
-    return (
-        parts.at(-1) ??
-        fullName
-    );
+    return parts.at(-1) ?? fullName;
 }
 
 /* =========================================================
@@ -874,15 +952,21 @@ function lastName(fullName) {
    ========================================================= */
 
 function isLiveGame(game) {
-    return game.abstractState === "Live";
+    return (
+        game.abstractState === "Live"
+    );
 }
 
 function isFinalGame(game) {
-    return game.abstractState === "Final";
+    return (
+        game.abstractState === "Final"
+    );
 }
 
 function isUpcomingGame(game) {
-    return game.abstractState === "Preview";
+    return (
+        game.abstractState === "Preview"
+    );
 }
 
 function isDelayedGame(game) {
@@ -928,10 +1012,11 @@ function getGameClass(game) {
 function startPageRotation() {
     stopPageRotation();
 
-    state.pageTimer = window.setInterval(
-        showNextPage,
-        CONFIG.pageIntervalMs
-    );
+    state.pageTimer =
+        window.setInterval(
+            showNextPage,
+            CONFIG.pageIntervalMs
+        );
 }
 
 function stopPageRotation() {
@@ -956,15 +1041,19 @@ function showNextPage() {
         (state.currentPage + 1) %
         state.pages.length;
 
-    updatePageClasses(previousPage);
+    updatePageClasses(
+        previousPage
+    );
+
     updatePageIndicator();
 }
 
 function updatePageClasses(previousPage) {
     const pageElements =
-        elements.scoresTrack.querySelectorAll(
-            ".score-page"
-        );
+        elements.scoresTrack
+            .querySelectorAll(
+                ".score-page"
+            );
 
     pageElements.forEach(
         (page, index) => {
@@ -975,7 +1064,8 @@ function updatePageClasses(previousPage) {
             );
 
             if (
-                index === state.currentPage
+                index ===
+                state.currentPage
             ) {
                 page.classList.add(
                     "is-active"
@@ -997,7 +1087,8 @@ function updatePageClasses(previousPage) {
             }
 
             if (
-                index < state.currentPage
+                index <
+                state.currentPage
             ) {
                 page.classList.add(
                     "is-before"
@@ -1012,77 +1103,91 @@ function updatePageClasses(previousPage) {
 }
 
 function updatePageIndicator() {
-    const pageCount = Math.max(
-        state.pages.length,
-        1
-    );
+    const pageCount =
+        Math.max(
+            state.pages.length,
+            1
+        );
 
     elements.pageIndicator.textContent =
         `${state.currentPage + 1} / ${pageCount}`;
 }
 
 /* =========================================================
-   BOTTOM MARQUEE
+   SEAMLESS BOTTOM CRAWL
    ========================================================= */
 
 function renderBottomMarquee() {
     if (state.games.length === 0) {
-        elements.bottomMarquee.textContent =
-            "No recent MLB games were found.";
-
-        restartMarqueeAnimation();
+        setMarqueeText(
+            "No recent MLB games were found."
+        );
 
         return;
     }
 
-    const summaries = state.games.map(game => {
-        const away =
-            game.away.abbreviation;
+    const summaries =
+        state.games.map(game => {
+            const away =
+                game.away.abbreviation;
 
-        const home =
-            game.home.abbreviation;
+            const home =
+                game.home.abbreviation;
 
-        if (isLiveGame(game)) {
-            return (
-                `${away} ${game.away.score}, ` +
-                `${home} ${game.home.score} — ` +
-                `${getPrimaryStatus(game)}`
-            );
-        }
+            if (isLiveGame(game)) {
+                return (
+                    `${away} ${game.away.runs} ` +
+                    `${home} ${game.home.runs} — ` +
+                    `${getPrimaryStatus(game)}`
+                );
+            }
 
-        if (isFinalGame(game)) {
-            return (
-                `${away} ${game.away.score}, ` +
-                `${home} ${game.home.score} — Final`
-            );
-        }
+            if (isFinalGame(game)) {
+                return (
+                    `${away} ${game.away.runs} ` +
+                    `${home} ${game.home.runs} — Final`
+                );
+            }
 
-        if (isDelayedGame(game)) {
+            if (isDelayedGame(game)) {
+                return (
+                    `${away} at ${home} — ` +
+                    `${game.detailedState}`
+                );
+            }
+
             return (
                 `${away} at ${home} — ` +
-                `${game.detailedState}`
+                `${formatGameTime(game.gameDate)}`
             );
-        }
+        });
 
-        return (
-            `${away} at ${home} — ` +
-            `${formatGameTime(game.gameDate)}`
-        );
-    });
+    setMarqueeText(
+        summaries.join("     •     ")
+    );
+}
 
-    elements.bottomMarquee.textContent =
-        summaries.join("     •     ");
+function setMarqueeText(text) {
+    /*
+     * Both copies use identical text. Once the first copy
+     * scrolls away, the second is already directly behind it.
+     */
+    elements.marqueeOne.textContent =
+        text;
+
+    elements.marqueeTwo.textContent =
+        text;
 
     restartMarqueeAnimation();
 }
 
 function restartMarqueeAnimation() {
-    elements.bottomMarquee.style.animation =
+    elements.marqueeTrack.style.animation =
         "none";
 
-    void elements.bottomMarquee.offsetWidth;
+    void elements.marqueeTrack.offsetWidth;
 
-    elements.bottomMarquee.style.animation =
+    elements.marqueeTrack.style.animation =
         "";
 }
 
@@ -1103,14 +1208,10 @@ function renderNoGamesMessage() {
     elements.pageIndicator.textContent =
         "0 / 0";
 
-    elements.bottomLabel.textContent =
-        "MLB SCOREBOARD";
-
-    elements.bottomMarquee.textContent =
+    setMarqueeText(
         "No MLB games were found within the previous " +
-        `${CONFIG.latestGamesLookbackDays} days.`;
-
-    restartMarqueeAnimation();
+        `${CONFIG.latestGamesLookbackDays} days.`
+    );
 }
 
 function renderErrorMessage() {
@@ -1126,10 +1227,9 @@ function renderErrorMessage() {
     elements.pageIndicator.textContent =
         "—";
 
-    elements.bottomMarquee.textContent =
-        "Unable to reach the MLB score service. Retrying automatically.";
-
-    restartMarqueeAnimation();
+    setMarqueeText(
+        "Unable to reach the MLB score service. Retrying automatically."
+    );
 }
 
 /* =========================================================
@@ -1292,7 +1392,8 @@ function parseLocalDate(dateString) {
 
 function getTeamColor(abbreviation) {
     return (
-        TEAM_INFO[abbreviation]?.color ??
+        TEAM_INFO[abbreviation]
+            ?.color ??
         "#6c7582"
     );
 }
