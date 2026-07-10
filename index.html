@@ -15,10 +15,16 @@
 
 <body>
     <main id="ticker" class="ticker">
-        <!-- Left league/branding block -->
+
+        <!-- LEFT BRAND AREA -->
         <section class="ticker-brand" aria-label="MLB scoreboard">
             <div class="brand-top">
-                <span class="brand-baseball">●</span>
+                <img
+                    class="brand-logo"
+                    src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Major_League_Baseball_logo.svg/1280px-Major_League_Baseball_logo.svg.png"
+                    alt="MLB"
+                >
+
                 <span class="brand-text">MLB</span>
             </div>
 
@@ -27,7 +33,7 @@
             </div>
         </section>
 
-        <!-- Score viewport -->
+        <!-- GAME CARDS -->
         <section class="scores-viewport">
             <div id="scores-track" class="scores-track">
                 <div class="message-card">
@@ -37,7 +43,7 @@
             </div>
         </section>
 
-        <!-- Page and refresh information -->
+        <!-- RIGHT STATUS AREA -->
         <section class="ticker-meta">
             <div class="meta-live-row">
                 <span id="live-dot" class="live-dot"></span>
@@ -53,18 +59,32 @@
             </div>
         </section>
 
-        <!-- Thin lower information strip -->
+        <!-- BOTTOM CRAWL -->
         <section class="ticker-bottom">
             <div id="bottom-label" class="bottom-label">
                 MLB SCOREBOARD
             </div>
 
             <div class="bottom-marquee-viewport">
-                <div id="bottom-marquee" class="bottom-marquee">
-                    Live scores and game information update automatically.
+                <div id="bottom-marquee-track" class="bottom-marquee-track">
+                    <div
+                        id="bottom-marquee-one"
+                        class="bottom-marquee-content"
+                    >
+                        MLB scores update automatically.
+                    </div>
+
+                    <div
+                        id="bottom-marquee-two"
+                        class="bottom-marquee-content"
+                        aria-hidden="true"
+                    >
+                        MLB scores update automatically.
+                    </div>
                 </div>
             </div>
         </section>
+
     </main>
 
     <script src="script.js"></script>
